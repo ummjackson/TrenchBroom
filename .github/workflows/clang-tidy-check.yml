@@ -2,8 +2,6 @@ name: CPP Linter
 on: [pull_request]
 
 permissions:
-  # This grants the GITHUB_TOKEN the necessary permissions for use with nuget.
-  packages: write
   pull-requests: write
 
 jobs:
@@ -13,15 +11,6 @@ jobs:
     env:
       # Record pull request head commit SHA
       TB_PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      # Set up environment variables required for caching vcpkg packages using NuGet
-      # See https://learn.microsoft.com/en-us/vcpkg/consume/binary-caching-github-packages?pivots=windows-runner
-      USERNAME: TrenchBroom
-      VCPKG_EXE: ${{ github.workspace }}/vcpkg/vcpkg
-      FEED_URL: https://nuget.pkg.github.com/TrenchBroom/index.json
-      VCPKG_BINARY_SOURCES: "clear;nuget,https://nuget.pkg.github.com/TrenchBroom/index.json,readwrite"
-      # Set up environment variables required for Mono (on macOS)
-      # See https://formulae.brew.sh/formula/mono
-      MONO_GAC_PREFIX: "$HOMEBREW_PREFIX"
 
     steps:
       - name: Checkout code
@@ -34,6 +23,16 @@ jobs:
       - name: Setup common prerequisites
         uses: ./.github/actions/setup-common
 
+      - name: Setup shared CI environment
+        uses: ./.github/actions/setup-shared-env
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: ./.github/actions/vcpkg-cache-restore
+        with:
+          os: ubuntu-22.04
+          arch: default-arch
+
       - name: Bootstrap vcpkg
         shell: bash
         run: ${{ github.workspace }}/vcpkg/bootstrap-vcpkg.sh
@@ -43,25 +42,20 @@ jobs:
           sudo apt update
           sudo apt install build-essential libxi-dev libxrandr-dev libxxf86vm-dev freeglut3-dev mesa-common-dev libgl1-mesa-dev libglu1-mesa-dev libglm-dev pandoc cmake p7zip-full ninja-build libglew-dev libfreeimage-dev libfreetype6-dev libtinyxml2-dev libassimp-dev libfuse2
 
-      - name: Add NuGet sources
-        shell: bash
-        run: |
-          mono `${{ env.VCPKG_EXE }} fetch nuget | tail -n 1` \
-            sources add \
-            -Source "${{ env.FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.USERNAME }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}"
-          mono `${{ env.VCPKG_EXE }} fetch nuget | tail -n 1` \
-            setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.FEED_URL }}"
-
       - name: Run cmake
         run: |
           mkdir -p build
           cd build
           cmake .. -GNinja -DCMAKE_PREFIX_PATH="cmake/packages;$QT_ROOT_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DTB_ENABLE_PCH=0
+
+      - name: Save vcpkg binary cache
+        # This workflow only runs on pull requests, so a master-gated save
+        # would never fire. Save on any miss instead; the cache is scoped to
+        # the PR branch, so later pushes to the same PR hit it.
+        if: ${{ success() && steps.vcpkg-cache.outputs.cache-hit != 'true' }}
+        uses: ./.github/actions/vcpkg-cache-save
+        with:
+          key: ${{ steps.vcpkg-cache.outputs.key }}
 
       - name: Run clang-tidy
         uses: cpp-linter/cpp-linter-action@v2

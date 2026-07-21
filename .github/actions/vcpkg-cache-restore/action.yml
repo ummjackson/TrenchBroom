@@ -1,0 +1,30 @@
+name: Restore vcpkg binary cache
+description: Restore vcpkg binary cache using shared key structure
+inputs:
+  os:
+    description: OS key segment
+    required: true
+  arch:
+    description: Architecture key segment
+    required: true
+outputs:
+  cache-hit:
+    description: Whether the primary key produced an exact match
+    value: ${{ steps.restore.outputs.cache-hit }}
+  key:
+    description: The primary cache key computed for this restore
+    value: ${{ steps.restore.outputs.cache-primary-key }}
+runs:
+  using: composite
+  steps:
+    - name: Compute vcpkg submodule revision
+      shell: bash
+      # hashFiles cannot see submodule content, so hash the pinned commit instead
+      run: echo "TB_VCPKG_REV=$(git rev-parse HEAD:vcpkg)" >> "$GITHUB_ENV"
+
+    - name: Restore vcpkg binary cache
+      id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ env.VCPKG_CACHE_DIR }}
+        key: ${{ env.VCPKG_CACHE_KEY_PREFIX }}-${{ inputs.os }}-${{ inputs.arch }}-${{ env.TB_VCPKG_REV }}-${{ hashFiles('vcpkg.json', 'vcpkg-overlay-ports/**') }}

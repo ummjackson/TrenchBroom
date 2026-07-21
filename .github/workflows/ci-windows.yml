@@ -3,7 +3,6 @@ on:
   workflow_call:
 
 permissions:
-  packages: write
   contents: write
 
 jobs:
@@ -26,6 +25,13 @@ jobs:
 
       - name: Setup shared CI environment
         uses: ./.github/actions/setup-shared-env
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: ./.github/actions/vcpkg-cache-restore
+        with:
+          os: windows-2022
+          arch: ${{ env.TB_ARCH }}
 
       - name: Bootstrap vcpkg
         shell: pwsh
@@ -58,20 +64,6 @@ jobs:
           ccache --set-config=max_size=1G
           ccache --zero-stats
 
-      - name: Add NuGet sources
-        shell: pwsh
-        run: |
-          .$(${{ env.VCPKG_EXE }} fetch nuget) `
-            sources add `
-            -Source "${{ env.FEED_URL }}" `
-            -StorePasswordInClearText `
-            -Name GitHubPackages `
-            -UserName "${{ env.USERNAME }}" `
-            -Password "${{ secrets.GITHUB_TOKEN }}"
-          .$(${{ env.VCPKG_EXE }} fetch nuget) `
-            setapikey "${{ secrets.GITHUB_TOKEN }}" `
-            -Source "${{ env.FEED_URL }}"
-
       - name: Build
         run: cmd.exe /c CI-windows.bat
 
@@ -87,6 +79,12 @@ jobs:
           os: windows-2022
           build-type: ${{ env.TB_BUILD_TYPE }}
           arch: ${{ env.TB_ARCH }}
+
+      - name: Save vcpkg binary cache
+        if: ${{ success() && github.ref == 'refs/heads/master' && steps.vcpkg-cache.outputs.cache-hit != 'true' }}
+        uses: ./.github/actions/vcpkg-cache-save
+        with:
+          key: ${{ steps.vcpkg-cache.outputs.key }}
 
       - name: Upload artifacts
         uses: ./.github/actions/upload-artifacts

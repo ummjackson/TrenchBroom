@@ -1,0 +1,14 @@
+name: Save vcpkg binary cache
+description: Save vcpkg binary cache using shared key structure
+inputs:
+  key:
+    description: Cache key to save under
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Save vcpkg binary cache
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ env.VCPKG_CACHE_DIR }}
+        key: ${{ inputs.key }}

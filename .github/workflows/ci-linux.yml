@@ -3,7 +3,6 @@ on:
   workflow_call:
 
 permissions:
-  packages: write
   contents: write
 
 jobs:
@@ -27,6 +26,13 @@ jobs:
 
       - name: Setup shared CI environment
         uses: ./.github/actions/setup-shared-env
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: ./.github/actions/vcpkg-cache-restore
+        with:
+          os: ubuntu-24.04
+          arch: ${{ env.TB_ARCH }}
 
       - name: Restore ccache
         uses: ./.github/actions/ccache-restore
@@ -52,16 +58,11 @@ jobs:
             bash -lc 'mkdir -p "${CCACHE_DIR}" && ccache --set-config=max_size=1G && ccache --zero-stats'
 
       - name: Build in container
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           docker run --rm \
             --user runner \
             -e QT_ROOT_DIR="${QT_ROOT_DIR}" \
-            -e FEED_URL="${FEED_URL}" \
-            -e USERNAME="${USERNAME}" \
             -e VCPKG_BINARY_SOURCES="${VCPKG_BINARY_SOURCES}" \
-            -e GITHUB_TOKEN="${GH_TOKEN}" \
             -e CCACHE_DIR="${{ github.workspace }}/.ccache" \
             -e CCACHE_BASEDIR="${{ github.workspace }}" \
             -e CCACHE_NOHASHDIR=1 \
@@ -76,8 +77,6 @@ jobs:
               set -euo pipefail
               git config --global --add safe.directory "${{ github.workspace }}"
               ./vcpkg/bootstrap-vcpkg.sh
-              mono `./vcpkg/vcpkg fetch nuget | tail -n 1` sources add -Source "${FEED_URL}" -StorePasswordInClearText -Name GitHubPackages -UserName "${USERNAME}" -Password "${GITHUB_TOKEN}"
-              mono `./vcpkg/vcpkg fetch nuget | tail -n 1` setapikey "${GITHUB_TOKEN}" -Source "${FEED_URL}"
               ./CI-linux.sh
             '
 
@@ -98,6 +97,12 @@ jobs:
           os: ubuntu-24.04
           build-type: ${{ env.TB_BUILD_TYPE }}
           arch: ${{ env.TB_ARCH }}
+
+      - name: Save vcpkg binary cache
+        if: ${{ success() && github.ref == 'refs/heads/master' && steps.vcpkg-cache.outputs.cache-hit != 'true' }}
+        uses: ./.github/actions/vcpkg-cache-save
+        with:
+          key: ${{ steps.vcpkg-cache.outputs.key }}
 
       - name: Upload artifacts
         uses: ./.github/actions/upload-artifacts
